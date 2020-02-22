@@ -81,7 +81,7 @@ class BisonParser(object):
         bisonCmd = [WIN_BISON, '-d', '-v', '-t']
     else:
         bisonCmd.append('bison')
-        bisonCmd = ['bison', '-d', '-v', '-t']
+        bisonCmd = ['bison', '-d', '-t']
 
     bisonFile = 'tmp.y'
     bisonCFile = 'tmp.tab.c'
@@ -97,15 +97,15 @@ class BisonParser(object):
 
     # command and options for running [f]lex, except for filename arg.
     flexCmd = []
+    flexFile = 'tmp.l'
+    flexCFile = 'lex.yy.c'
+    flexHFile = 'lex.yy.h'
+
     if sys.platform == 'win32':
         # flexCmd.append('-DYY_NO_UNISTD_H=false')
         flexCmd = [WIN_FLEX, '--wincompat']
     else:
-        flexCmd = ['flex']
-
-    flexFile = 'tmp.l'
-    flexCFile = 'lex.yy.c'
-    flexHFile = 'lex.yy.h'
+        flexCmd = ['flex', '--header-file={}'.format(flexHFile)]
 
     # C output file from flex gets renamed to this.
     flexCFile1 = 'tmp.lex.c'
@@ -140,7 +140,7 @@ class BisonParser(object):
     last = None
 
     # Enable this to keep all temporary engine build files.
-    keepfiles = 1
+    keepfiles = 0
 
     # Enable this to handle all error exceptions by error-rules
     handlesErrorRules = 0
@@ -176,7 +176,7 @@ class BisonParser(object):
         self.debug = kw.get('debug', 0)
 
         if buildDirectory is not None:
-            self.buildDirectory = buildDirectory
+            self.buildDirectory = buildDirectory + os.path.sep
         else:
             self.buildDirectory = '/tmp/pybison/pybison_' + type(self).__name__ + os.path.sep
 
@@ -255,7 +255,7 @@ class BisonParser(object):
                 self.last = handler(target=targetname, option=option, names=names, values=values)
             except Exception as e:
                 self.last = e
-                return e
+                raise e
 
             # if self.verbose:
             #    print("handler for {} returned {}".format(targetname, repr(self.last)))
@@ -395,7 +395,12 @@ class BisonParser(object):
         if self.verbose:
             print('Parser.read: want %s bytes' % nbytes)
 
-        _bytes = self.file.readline(nbytes).replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+        _bytes = self.file.readline(nbytes)
+
+        if isinstance(_bytes, str):
+            _bytes = _bytes.encode()
+
+        _bytes = _bytes.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
 
         if self.verbose:
             print('Parser.read: got %s bytes' % len(_bytes))

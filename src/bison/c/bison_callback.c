@@ -28,6 +28,8 @@
 
 #if PY_MAJOR_VERSION >= 3
 #define PY3
+#else
+#error NOT PYTHON3
 #endif
 
 #include <stdarg.h>
@@ -91,15 +93,17 @@ PyObject* py_callback(PyObject *parser, char *target, int option, int nargs, ...
 
     // Construct the names and values list from the variable argument list.
     for(i = 0; i < nargs; i++) {
+      char* cname = va_arg(ap, char*);
       #ifdef PY3
-        PyObject *name = PyUnicode_FromString(va_arg(ap, char *));
+        PyObject *name = PyUnicode_FromString(cname);
       #else
-        PyObject *name = PyString_FromString(va_arg(ap, char *));
+        PyObject *name = PyString_FromString(cname);
       #endif
         if(!name){
           Py_INCREF(Py_None);
           name = Py_None;
         }
+        else Py_INCREF(name);    // is it necessary?
         PyList_SetItem(names, i, name);
 
         PyObject *value = va_arg(ap, PyObject *);
@@ -107,7 +111,8 @@ PyObject* py_callback(PyObject *parser, char *target, int option, int nargs, ...
           Py_INCREF(Py_None);
           value = Py_None;
         }
-        Py_INCREF(value);
+        else
+          Py_INCREF(value);
         PyList_SetItem(values, i, value);
     }
 
@@ -129,7 +134,7 @@ PyObject* py_callback(PyObject *parser, char *target, int option, int nargs, ...
     Py_DECREF(handle);
     Py_DECREF(arglist);
 
-    if (unlikely(!res)) return res;
+    if (unlikely(!res)) return NULL;
 
     // Check if the "hook_handler" callback exists
     handle = PyObject_GetAttr(parser, py_attr_hook_handler_name);
@@ -145,17 +150,27 @@ PyObject* py_callback(PyObject *parser, char *target, int option, int nargs, ...
 
     // Call the "hook_handler" callback
     arglist = Py_BuildValue("(siOOO)", target, option, names, values, res);
-    if (unlikely(!arglist)) { Py_DECREF(handle); return res; }
+    if (unlikely(!arglist)) {
+        Py_DECREF(handle);
+        Py_DECREF(res);
+        return NULL;
+    }
 
     res = PyObject_CallObject(handle, arglist);
 
-    PyObject *exc = PyErr_Occurred();
-    if(unlikely(exc)){
-      printf("exception in callback!!\n");
-      return -1;
-    }
     Py_DECREF(handle);
     Py_DECREF(arglist);
+
+    PyObject *exc = PyErr_Occurred();
+    if (unlikely(exc==res)) {
+fprintf(stderr, "exc and res are both NULL???\n");
+        PyErr_SetString(PyExc_AssertionError, "exc and res are both NULL");
+        return NULL;
+    }
+
+    if (unlikely(exc!=NULL)){
+      return NULL;
+    }
 
     return res;
 }
@@ -215,12 +230,14 @@ void py_input(PyObject *parser, char *buf, int *result, int max_size) {
     if (unlikely(!PyObject_HasAttr(parser, py_attr_hook_read_after_name)))
         goto finish_input;
 
+    Py_DECREF(res);
+
     handle = PyObject_GetAttr(parser, py_attr_hook_read_after_name);
-    if (unlikely(!handle)) return;
+    if (unlikely(!handle)) { Py_DECREF(res); return; }
 
     // Call the "hook_READ_AFTER" callback
     arglist = Py_BuildValue("(O)", res);
-    if (unlikely(!arglist)) { Py_DECREF(handle); return; }
+    if (unlikely(!arglist)) { Py_DECREF(res); Py_DECREF(handle); return; }
 
     res = PyObject_CallObject(handle, arglist);
 
@@ -233,6 +250,7 @@ void py_input(PyObject *parser, char *buf, int *result, int max_size) {
 finish_input:
 
     // Copy the read python input string to the buffer
+//FIXME: res is already Py_XDECREFed; is that okay? It seems so
     #ifdef PY3
     bufstr = PyBytes_AsString(res);
     #else
@@ -258,13 +276,15 @@ finish_input:
         PyObject* po_long1 = PyLong_FromLong(1);
         // execute attribute setting
         int success = PyObject_SetAttr(parser, py_attr_input_marker, po_long1);
+        Py_DECREF(marker_handle);
+        if (likely(po_long1!=NULL))
+            Py_DECREF(po_long1);
         if (success != 0)
             return;
-        Py_DECREF(marker_handle);
-        Py_DECREF(po_long1);
 
         // TODO: something went wrong while closing the buffer.
         if (unlikely(!res)) return;
+//FIXME: res is already Py_XDECREFed
         Py_XDECREF(res);
     }
 }

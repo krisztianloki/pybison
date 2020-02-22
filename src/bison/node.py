@@ -96,7 +96,7 @@ class BisonNode:
         #print ("%s%s: %s %s" % (indents, self.target, self.option, self.names))
         print ('%s%s:' % (indents, self.target))
 
-        for name, val in self.kw.items() + zip(self.names, self.values):
+        for name, val in self.kw.items() + set(zip(self.names, self.values)):
             if name in specialAttribs or name.startswith('_'):
                 continue
 

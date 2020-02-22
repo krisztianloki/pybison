@@ -256,6 +256,7 @@ cdef class ParserEngine:
         if parser.verbose:
             print("Successfully loaded library")
 
+
     def generate_exception_handler(self):
         s = ''
         s += '          {\n'
@@ -266,6 +267,7 @@ cdef class ParserEngine:
         s += '            }\n'
         s += '          }\n'
         return s
+
 
     def buildLib(self):
         """
@@ -325,18 +327,18 @@ cdef class ParserEngine:
         if "%define api.pure full" in gOptions:
             error_def = 'void yyerror(YYLTYPE *locp, yyscan_t scanner, char const *msg);'
         else:
-            error_def = 'int yyerror(char *msg);'
+            error_def = 'int yyerror(const char *msg);'
 
 
         # grammar file prologue
         write('\n'.join([
             '%code top {',
             '',
-            '#include "tokens.h"',
             '#include "tmp.lex.h"',
             '#include "Python.h"',
             # '' if sys.platform == 'win32' else 'extern int yylineno;'
             '#define YYSTYPE void*',
+            '#include "tokens.h"',
             #'extern void *py_callback(void *, char *, int, void*, ...);',
             'void *(*py_callback)(void *, char *, int, int, ...);',
             'void (*py_input)(void *, char *, int *, int);',
@@ -435,15 +437,21 @@ cdef class ParserEngine:
                     if nterms == 0:
                         args.append('NULL')
                     else:
-                        for i in range(nterms):
-                            if option[i] == '%prec':
-                                i = i - 1
+                        for k in range(nterms):
+                            if option[k] == '%prec':
+                                k = k - 1
                                 break # hack for rules using '%prec'
-                            o = option[i].replace('"', '\\"')
+                            if option[k][0] == '[' and option[k][-1] == ']':
+                                option[k] = option[k][1:-1]
+                                continue
+                            i = i + 1
+                            o = option[k].replace('"', '\\"')
                             if o == 'error':
                                 args.append('"%s", lasterr' % (o))
                             else:
-                                args.append('"%s", $%d' % (o, i+1))
+                                args.append('"%s", $%d' % (o, k+1))
+                        if i == -1:
+                            args.append('NULL')
 
                     # now, we have the correct terms count
                     action = action % (i + 1)
@@ -549,32 +557,39 @@ cdef class ParserEngine:
             '',
             # 'extern char *yytext;',
             '',
-            'int yyerror(char *msg)',
+            'int yyerror(const char *msg)',
             '{',
             '  PyObject *error = PyErr_Occurred();',
             '  if(error) PyErr_Clear();',
             '  PyObject *fn = PyObject_GetAttrString((PyObject *)py_parser,',
             '                                        "report_syntax_error");',
             '  if (!fn)',
+            '{fprintf(stderr, "No report_syntax_error\\n");',
             '      return 1;',
+            '}',
             '',
+            'fprintf(stderr, "report_syntax_error is callable: %d\\n", PyCallable_Check(fn));',
             '  PyObject *args;',
             '  args = Py_BuildValue("(s,s,i,i,i,i)", msg, yytext,',
             '                       yylloc.first_line, yylloc.first_column,',
             '                       yylloc.last_line, yylloc.last_column);',
             '',
             '  if (!args)',
+            '{fprintf(stderr, "No args\\n");',
             '      return 1;',
-            #'',
-            #'  fprintf(stderr, "%d.%d-%d.%d: error: \'%s\' before \'%s\'.",',
-            #'          yylloc.first_line, yylloc.first_column,',
-            #'          yylloc.last_line, yylloc.last_column, msg, yytext);',
+            '}',
+            '',
+            '  fprintf(stderr, "%d.%d-%d.%d: error: \'%s\' before \'%s\'.",',
+            '          yylloc.first_line, yylloc.first_column,',
+            '          yylloc.last_line, yylloc.last_column, msg, yytext);',
             '',
             '  PyObject *res = PyObject_CallObject(fn, args);',
             '  Py_DECREF(args);',
             '',
             '  if (!res)',
+            '{fprintf(stderr, "Exception in report_syntax_error\\n");',
             '      return 1;',
+            '}',
             '',
             '  Py_XDECREF(res);',
             '  return 0;',
@@ -671,11 +686,12 @@ cdef class ParserEngine:
 
         if os.path.isfile(buildDirectory + parser.flexHFile1):
             os.unlink(buildDirectory + parser.flexHFile1)
-        if parser.verbose:
-            print("{} => {}{}".format(parser.flexHFile, buildDirectory, parser.flexHFile1))
-        shutil.copy(parser.flexHFile, buildDirectory + parser.flexHFile1)
-        # delete 'local' file
-        # os.remove(parser.flexHFile)
+        if os.path.isfile(parser.flexHFile):
+            if parser.verbose:
+                print("{} => {}{}".format(parser.flexHFile, buildDirectory, parser.flexHFile1))
+            shutil.copy(parser.flexHFile, buildDirectory + parser.flexHFile1)
+            # delete 'local' file
+            # os.remove(parser.flexHFile)
 
 
         if parser._buildOnlyCFiles:
@@ -719,10 +735,10 @@ cdef class ParserEngine:
         # hitlist = objs[:]
         hitlist = []
 
-        if os.path.isfile(self.libFilename_py):
+        if os.path.isfile(libFileName):
             for name in ['bisonFile', 'bisonCFile', 'bisonHFile',
                          'bisonCFile1', 'bisonHFile1', 'flexFile',
-                         'flexCFile', 'flexCFile1',
+                         'flexCFile', 'flexCFile1', 'flexHFile', 'flexHFile1'
                          ] + objs:
                 if hasattr(parser, name):
                     fname = buildDirectory + getattr(parser, name)
@@ -771,7 +787,7 @@ cdef class ParserEngine:
         try:
             ret = bisondynlib_run(handle, parser, cbvoid, invoid, debug)
         except Exception as e:
-            ret=None
+            raise e
 
         return ret
 

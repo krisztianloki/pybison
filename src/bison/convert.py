@@ -358,6 +358,7 @@ def bisonToPython(bisonfileName, lexfileName, pyfileName, generateClasses=0):
         '            sys.exit(0)',
         '',
         '    if len(args) > 0:',
+        '        args = list(args)',
         '        if \'-k\' in args:',
         '            keepfiles = 1',
         '            args.remove(\'-k\')',
