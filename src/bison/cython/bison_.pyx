@@ -122,7 +122,7 @@ cdef class ParserEngine:
         """
         self.parser = parser
 
-        self.libFilename_py = parser.buildDirectory \
+        self.libFilename_py = parser.libDirectory \
                               + parser.bisonEngineLibName \
                               + machinery.EXTENSION_SUFFIXES[0]
 
@@ -162,7 +162,7 @@ cdef class ParserEngine:
             distutils.log.set_verbosity(1)
 
         # search for a shared object
-        filenames = self.possible_so(parser.buildDirectory)
+        filenames = self.possible_so(parser.libDirectory)
 
         self.libFilename_py = ""
         if len(filenames) == 1:
@@ -171,7 +171,7 @@ cdef class ParserEngine:
         if not os.path.isfile(self.libFilename_py):
             self.buildLib()
             # search for a shared object
-            filenames = self.possible_so(parser.buildDirectory)
+            filenames = self.possible_so(parser.libDirectory)
 
             self.libFilename_py = ""
             if len(filenames) == 1:
@@ -305,6 +305,7 @@ cdef class ParserEngine:
         gLex = parser.lexscript
 
         buildDirectory = parser.buildDirectory
+        libDirectory   = parser.libDirectory
 
         # ------------------------------------------------
         # now, can generate the grammar file
@@ -339,7 +340,6 @@ cdef class ParserEngine:
             # '' if sys.platform == 'win32' else 'extern int yylineno;'
             '#define YYSTYPE void*',
             '#include "tokens.h"',
-            #'extern void *py_callback(void *, char *, int, void*, ...);',
             'void *(*py_callback)(void *, char *, int, int, ...);',
             'void (*py_input)(void *, char *, int *, int);',
             'void *py_parser;',
@@ -428,7 +428,7 @@ cdef class ParserEngine:
                     action = '\n        {\n'
                     if 'error' in option:
                         action = action + "             yyerrok;\n"
-                        action = action + "             PyObject* lasterr = PyObject_GetAttrString((PyObject*)py_parser, \"lasterror\");;\n"
+                        action = action + "             PyObject* lasterr = PyObject_GetAttrString((PyObject*)py_parser, \"lasterror\");\n"
                     action = action + '          $$ = (*py_callback)(\n            py_parser, "%s", %s, %%s' % \
                                       (rule[0], idx) # note we're deferring the substitution of 'nterms' (last arg)
                     args = []
@@ -540,7 +540,7 @@ cdef class ParserEngine:
             '',
             '  PyObject *res = PyObject_CallObject(fn, args);',
             '  Py_DECREF(args);',
-            #'  Py_DECREF(fn);',
+            '  Py_DECREF(fn);',
             '',
             '  if (!res)',
             '      return;',
@@ -564,20 +564,15 @@ cdef class ParserEngine:
             '  PyObject *fn = PyObject_GetAttrString((PyObject *)py_parser,',
             '                                        "report_syntax_error");',
             '  if (!fn)',
-            '{fprintf(stderr, "No report_syntax_error\\n");',
             '      return 1;',
-            '}',
             '',
-            'fprintf(stderr, "report_syntax_error is callable: %d\\n", PyCallable_Check(fn));',
             '  PyObject *args;',
             '  args = Py_BuildValue("(s,s,i,i,i,i)", msg, yytext,',
             '                       yylloc.first_line, yylloc.first_column,',
             '                       yylloc.last_line, yylloc.last_column);',
             '',
             '  if (!args)',
-            '{fprintf(stderr, "No args\\n");',
             '      return 1;',
-            '}',
             '',
             '  fprintf(stderr, "%d.%d-%d.%d: error: \'%s\' before \'%s\'.",',
             '          yylloc.first_line, yylloc.first_column,',
@@ -587,9 +582,7 @@ cdef class ParserEngine:
             '  Py_DECREF(args);',
             '',
             '  if (!res)',
-            '{fprintf(stderr, "Exception in report_syntax_error\\n");',
             '      return 1;',
-            '}',
             '',
             '  Py_XDECREF(res);',
             '  return 0;',
@@ -630,7 +623,7 @@ cdef class ParserEngine:
             print("bison cmd: {}".format(' '.join(bisonCmd)))
 
         # env.spawn(bisonCmd)
-        proc = subprocess.Popen(' '.join(bisonCmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        proc = subprocess.Popen(' '.join(bisonCmd), stdout = subprocess.PIPE, stderr = subprocess.PIPE, shell = True, cwd = buildDirectory)
         (out, err) = proc.communicate()
         if proc.returncode:
             raise Exception(err)
@@ -640,24 +633,20 @@ cdef class ParserEngine:
 
         if parser.verbose:
             print("renaming bison output files")
-            print("{} => {}{}".format(parser.bisonCFile, buildDirectory,
-                                      parser.bisonCFile1))
-            print("{} => {}{}".format(parser.bisonHFile, buildDirectory,
-                                      parser.bisonHFile1))
+            print("{}{} => {}{}".format(buildDirectory, parser.bisonCFile,
+                                      buildDirectory, parser.bisonCFile1))
+            print("{}{} => {}{}".format(buildDirectory, parser.bisonHFile,
+                                      buildDirectory, parser.bisonHFile1))
 
         if os.path.isfile(buildDirectory + parser.bisonCFile1):
             os.unlink(buildDirectory + parser.bisonCFile1)
 
-        shutil.copy(parser.bisonCFile, buildDirectory + parser.bisonCFile1)
-        # delete 'local' file
-        os.remove(parser.bisonCFile)
+        shutil.move(buildDirectory + parser.bisonCFile, buildDirectory + parser.bisonCFile1)
 
         if os.path.isfile(buildDirectory + parser.bisonHFile1):
             os.unlink(buildDirectory + parser.bisonHFile1)
 
-        shutil.copy(parser.bisonHFile, buildDirectory + parser.bisonHFile1)
-        # delete 'local' file
-        os.remove(parser.bisonHFile)
+        shutil.move(buildDirectory + parser.bisonHFile, buildDirectory + parser.bisonHFile1)
 
         # -----------------------------------------
         # Now run lex on the lex file
@@ -668,7 +657,7 @@ cdef class ParserEngine:
             print("flex cmd: {}".format(' '.join(flexCmd)))
 
         # env.spawn(flexCmd)
-        proc = subprocess.Popen(' '.join(flexCmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        proc = subprocess.Popen(' '.join(flexCmd), stdout = subprocess.PIPE, stderr = subprocess.PIPE, shell = True, cwd = buildDirectory)
         (out, err) = proc.communicate()
         if proc.returncode:
             raise Exception(err)
@@ -679,19 +668,14 @@ cdef class ParserEngine:
         if os.path.isfile(buildDirectory + parser.flexCFile1):
             os.unlink(buildDirectory + parser.flexCFile1)
         if parser.verbose:
-            print("{} => {}{}".format(parser.flexCFile, buildDirectory, parser.flexCFile1))
-        shutil.copy(parser.flexCFile, buildDirectory + parser.flexCFile1)
-        # delete 'local' file
-        os.remove(parser.flexCFile)
+            print("{}{} => {}{}".format(buildDirectory, parser.flexCFile, buildDirectory, parser.flexCFile1))
+        shutil.move(buildDirectory + parser.flexCFile, buildDirectory + parser.flexCFile1)
 
         if os.path.isfile(buildDirectory + parser.flexHFile1):
             os.unlink(buildDirectory + parser.flexHFile1)
-        if os.path.isfile(parser.flexHFile):
-            if parser.verbose:
-                print("{} => {}{}".format(parser.flexHFile, buildDirectory, parser.flexHFile1))
-            shutil.copy(parser.flexHFile, buildDirectory + parser.flexHFile1)
-            # delete 'local' file
-            # os.remove(parser.flexHFile)
+        if parser.verbose:
+            print("{}{} => {}{}".format(buildDirectory, parser.flexHFile, buildDirectory, parser.flexHFile1))
+        shutil.move(buildDirectory + parser.flexHFile, buildDirectory + parser.flexHFile1)
 
 
         if parser._buildOnlyCFiles:
@@ -701,11 +685,12 @@ cdef class ParserEngine:
         # Now compile the files into a shared lib
         objs = env.compile([buildDirectory + parser.bisonCFile1,
                             buildDirectory + parser.flexCFile1],
+                           output_dir = "/" if os.path.isabs(buildDirectory) else ".",
                            extra_preargs=parser.cflags_pre,
                            extra_postargs=parser.cflags_post,
                            debug=parser.debugSymbols)
 
-        libFileName = buildDirectory + parser.bisonEngineLibName \
+        libFileName = libDirectory + parser.bisonEngineLibName \
                       + machinery.EXTENSION_SUFFIXES[0]
 
         if os.path.isfile(libFileName+".bak"):

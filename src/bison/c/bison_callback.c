@@ -84,6 +84,9 @@ PyObject* py_callback(PyObject *parser, char *target, int option, int nargs, ...
     va_list ap;
     int i;
 
+    INIT_ATTR(py_attr_handle_name, "_handle", return NULL);
+    INIT_ATTR(py_attr_hook_handler_name, "hook_handler", return NULL);
+
     PyObject *res;
 
     PyObject *names = PyList_New(nargs),
@@ -117,9 +120,6 @@ PyObject* py_callback(PyObject *parser, char *target, int option, int nargs, ...
     }
 
     va_end(ap);
-
-    INIT_ATTR(py_attr_handle_name, "_handle", return NULL);
-    INIT_ATTR(py_attr_hook_handler_name, "hook_handler", return NULL);
 
     // Call the handler with the arguments
     PyObject *handle = PyObject_GetAttr(parser, py_attr_handle_name);

@@ -120,6 +120,9 @@ class BisonParser(object):
     # Directory used to store the generated / compiled files.
     buildDirectory = ''
 
+    # Directory used to store the generated library.
+    libDirectory = '.'
+
     # Add debugging symbols to the binary files.
     debugSymbols = 1
 
@@ -132,6 +135,9 @@ class BisonParser(object):
 
     # Default to sys.stdin.
     file = None
+
+    # The current line number
+    lineno = 0
 
     # Create a marker for input parsing.
     marker = 0
@@ -156,7 +162,7 @@ class BisonParser(object):
 
     error_threshold = 10
 
-    def __init__(self, buildDirectory=None, **kw):
+    def __init__(self, buildDirectory = None, libDirectory = None, **kw):
         """
         Abstract representation of parser
 
@@ -180,10 +186,13 @@ class BisonParser(object):
         else:
             self.buildDirectory = '/tmp/pybison/pybison_' + type(self).__name__ + os.path.sep
 
+        if libDirectory is not None:
+            self.libDirectory = libDirectory + os.path.sep
+
         if self.debug:
             self.cflags_post = ['-O0', '-g'] if sys.platform.startswith('linux') else []
-            shutil.rmtree(self.buildDirectory, ignore_errors=True)
-        makedirs(self.buildDirectory, exist_ok=True)
+            shutil.rmtree(self.buildDirectory, ignore_errors = True)
+        makedirs(self.buildDirectory, exist_ok = True)
 
         # setup
         read = kw.get('read', None)
@@ -228,8 +237,10 @@ class BisonParser(object):
 
         self.BisonSyntaxError = BisonSyntaxError
 
+
     def __getitem__(self, idx):
         return self.last[idx]
+
 
     def _handle(self, targetname, option, names, values):
         """
@@ -270,21 +281,26 @@ class BisonParser(object):
         # assumedly the last thing parsed is at the top of the tree
         return self.last
 
+
     def handle_timeout(self, signum, frame):
         raise TimeoutError("Computation exceeded timeout limit.")
+
 
     def reset(self):
         self.marker = 0
         self.engine.reset()
+
 
     def parse_string(self, string):
         """Supply file-like object containing the string."""
         file = IO(string.encode('utf-8'))
         return self.run(file=file)
 
+
     def parse_file(self, filename):
         """Better interface."""
         return self.run(file=filename)
+
 
     def run(self, **kw):
         """
@@ -329,7 +345,7 @@ class BisonParser(object):
             self.file = fileobj
         if read:
             self.read = read
-
+        self.lineno = 0
 
         if self.verbose and self.marker:
             print('Parser.run(): self.marker (', self.marker, ') is set')
@@ -382,6 +398,7 @@ class BisonParser(object):
         # return self.last[:-1]
         return self.last
 
+
     def read(self, nbytes):
         """
         Override this in your subclass, if you desire.
@@ -401,12 +418,14 @@ class BisonParser(object):
             _bytes = _bytes.encode()
 
         _bytes = _bytes.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+        self.lineno = self.lineno + 1
 
         if self.verbose:
             print('Parser.read: got %s bytes' % len(_bytes))
             print(_bytes)
 
         return _bytes
+
 
     def report_last_error(self, filename, error):
         """
@@ -446,6 +465,7 @@ class BisonParser(object):
             traceback.print_exc()
 
         print('ERROR:', error)
+
 
     def report_syntax_error(self, msg, yytext, first_line, first_col, last_line, last_col):
 
