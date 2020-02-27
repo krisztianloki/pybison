@@ -76,6 +76,7 @@ import distutils.ccompiler
 import subprocess
 from importlib import machinery
 import textwrap
+import weakref
 
 reSpaces = re.compile("\\s+")
 
@@ -120,7 +121,7 @@ cdef class ParserEngine:
         Either way, we end up with a binary parser engine which matches the
         current rules in the parser object.
         """
-        self.parser = parser
+        self.parser = weakref.proxy(parser)
 
         self.libFilename_py = parser.libDirectory \
                               + parser.bisonEngineLibName \
@@ -242,7 +243,7 @@ cdef class ParserEngine:
 
         handle = bisondynlib_open(libFilename)
         if handle == NULL:
-            raise Exception('library loading failed!')
+            raise Exception('library loading failed: {}'.format(PyUnicode_FromString(bisondynlib_err())))
         self.libHandle = handle
 
         err = bisondynlib_err()
@@ -262,7 +263,6 @@ cdef class ParserEngine:
         s += '          {\n'
         s += '            PyObject* obj = PyErr_Occurred();\n'
         s += '            if (obj) {\n'
-        s += '              //yyerror(&yylloc, "exception raised");\n'
         s += '              YYERROR;\n'
         s += '            }\n'
         s += '          }\n'
@@ -298,11 +298,19 @@ cdef class ParserEngine:
         gHandlers.sort(key=keyLines)
 
         # get start symbol, tokens, precedences, lex script
-        gOptions = parser.options
+        gOptions = list(parser.options)
         gStart = parser.start
         gTokens = parser.tokens
         gPrecedences = parser.precedences
         gLex = parser.lexscript
+
+        if parser.prefix:
+            prefix = parser.prefix
+            gOptions.append("%define api.prefix {}".format(prefix))
+        else:
+            prefix = "yy"
+
+        PREFIX = prefix.upper()
 
         buildDirectory = parser.buildDirectory
         libDirectory   = parser.libDirectory
@@ -326,9 +334,9 @@ cdef class ParserEngine:
 
         # define yyerror for reentrant/nonreentrant parser
         if "%define api.pure full" in gOptions:
-            error_def = 'void yyerror(YYLTYPE *locp, yyscan_t scanner, char const *msg);'
+            error_def = 'void {}error(YYLTYPE *locp, yyscan_t scanner, char const *msg);'.format(prefix)
         else:
-            error_def = 'int yyerror(const char *msg);'
+            error_def = 'int {}error(const char *msg);'.format(prefix)
 
 
         # grammar file prologue
@@ -338,7 +346,7 @@ cdef class ParserEngine:
             '#include "tmp.lex.h"',
             '#include "Python.h"',
             # '' if sys.platform == 'win32' else 'extern int yylineno;'
-            '#define YYSTYPE void*',
+            '#define {}STYPE void*'.format(PREFIX),
             '#include "tokens.h"',
             'void *(*py_callback)(void *, char *, int, int, ...);',
             'void (*py_input)(void *, char *, int *, int);',
@@ -346,12 +354,18 @@ cdef class ParserEngine:
             export + 'char *rules_hash = "%s";' % self.parserHash,
             '#define YYERROR_VERBOSE 1',
             '',
+            export + 'void reset_flex_buffer(void) {',
+            '   {}lex_destroy();'.format(prefix),
+#            '   BEGIN INITIAL;',
+            '   {}restart(NULL);'.format(prefix),
+            '}',
+            '',
             '}',
             '',
             '%code requires {',
             '',
             'typedef void * yyscan_t;',
-            '#define YYLTYPE YYLTYPE',
+            '#define {}LTYPE YYLTYPE'.format(PREFIX),
             'typedef struct YYLTYPE',
             '{',
             '  int first_line;',
@@ -504,7 +518,7 @@ cdef class ParserEngine:
                 '',
                 'int status;',
                 'yypstate *ps = yypstate_new ();',
-                'YYSTYPE pushed_value;',
+                '{}STYPE pushed_value;'.format(PREFIX),
                 'YYLTYPE yylloc;',
                 'yylloc.first_line = yylloc.first_column = yylloc.last_line = yylloc.last_column = 1;',
                 'do {',
@@ -517,8 +531,8 @@ cdef class ParserEngine:
             '}',
             '',
             '',
-            'void yyerror(YYLTYPE *locp, yyscan_t scanner, char const *msg) {',
-            '',
+            'void {}error(YYLTYPE *locp, yyscan_t scanner, char const *msg)'.format(prefix),
+            '{',
             '  PyObject *error = PyErr_Occurred();',
             '  if(error) PyErr_Clear();',
             '  PyObject *fn = PyObject_GetAttrString((PyObject *)py_parser,',
@@ -552,12 +566,11 @@ cdef class ParserEngine:
 
         else:
             epilogue += '\n'.join([
-            '   yyparse();',
+            '   {}parse();'.format(prefix),
             '}',
             '',
-            # 'extern char *yytext;',
             '',
-            'int yyerror(const char *msg)',
+            'int {}error(const char *msg)'.format(prefix),
             '{',
             '  PyObject *error = PyErr_Occurred();',
             '  if(error) PyErr_Clear();',
@@ -567,7 +580,7 @@ cdef class ParserEngine:
             '      return 1;',
             '',
             '  PyObject *args;',
-            '  args = Py_BuildValue("(s,s,i,i,i,i)", msg, yytext,',
+            '  args = Py_BuildValue("(s,s,i,i,i,i)", msg, {}text,'.format(prefix),
             '                       yylloc.first_line, yylloc.first_column,',
             '                       yylloc.last_line, yylloc.last_column);',
             '',
@@ -576,7 +589,7 @@ cdef class ParserEngine:
             '',
             '  fprintf(stderr, "%d.%d-%d.%d: error: \'%s\' before \'%s\'.",',
             '          yylloc.first_line, yylloc.first_column,',
-            '          yylloc.last_line, yylloc.last_column, msg, yytext);',
+            '          yylloc.last_line, yylloc.last_column, msg, {}text);'.format(prefix),
             '',
             '  PyObject *res = PyObject_CallObject(fn, args);',
             '  Py_DECREF(args);',
@@ -599,7 +612,7 @@ cdef class ParserEngine:
             os.unlink(buildDirectory + parser.flexFile)
 
         f = open(buildDirectory + parser.flexFile, 'w')
-        f.write(textwrap.dedent(gLex))
+        f.write(textwrap.dedent(gLex).replace("YYSTYPE", PREFIX+"STYPE").replace("yy", prefix))
         f.close()
 
         # create and set up a compiler object
@@ -651,7 +664,8 @@ cdef class ParserEngine:
         # -----------------------------------------
         # Now run lex on the lex file
         #os.system('lex tmp.l')
-        flexCmd = parser.flexCmd + [buildDirectory + parser.flexFile]
+        flexCFile = parser.flexCFile.replace("yy", prefix)
+        flexCmd = parser.flexCmd + ['--prefix', prefix, buildDirectory + parser.flexFile]
 
         if parser.verbose:
             print("flex cmd: {}".format(' '.join(flexCmd)))
@@ -668,8 +682,8 @@ cdef class ParserEngine:
         if os.path.isfile(buildDirectory + parser.flexCFile1):
             os.unlink(buildDirectory + parser.flexCFile1)
         if parser.verbose:
-            print("{}{} => {}{}".format(buildDirectory, parser.flexCFile, buildDirectory, parser.flexCFile1))
-        shutil.move(buildDirectory + parser.flexCFile, buildDirectory + parser.flexCFile1)
+            print("{}{} => {}{}".format(buildDirectory, flexCFile, buildDirectory, parser.flexCFile1))
+        shutil.move(buildDirectory + flexCFile, buildDirectory + parser.flexCFile1)
 
         if os.path.isfile(buildDirectory + parser.flexHFile1):
             os.unlink(buildDirectory + parser.flexHFile1)
@@ -780,6 +794,9 @@ cdef class ParserEngine:
         """
         Clean up and bail
         """
+        print("""
+Deleting ParserEngine
+""")
         self.closeLib()
 
 
@@ -828,6 +845,9 @@ def hashParserObject(parser):
         if type(o) == type(""):
             o=o.encode("utf-8")
         hasher.update(o)
+
+    # add the start node
+    update(parser.start)
 
     # add the lex script
     update(parser.lexscript)

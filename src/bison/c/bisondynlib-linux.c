@@ -8,12 +8,11 @@
 
 void (*reset_flex_buffer)(void) = NULL;
 
-void *bisondynlib_open(char *filename) {
+void *bisondynlib_open(char *filename)
+{
     void *handle;
 
     handle = dlopen(filename, (RTLD_NOW|RTLD_GLOBAL));
-
-    dlerror();
 
     if (!handle)
         return NULL;
@@ -25,21 +24,27 @@ void *bisondynlib_open(char *filename) {
     return handle;
 }
 
-int bisondynlib_close(void *handle) {
+int bisondynlib_close(void *handle)
+{
+fprintf(stderr, "\nClosing library...\n\n");
     return dlclose(handle);
 }
 
-void bisondynlib_reset(void) {
+void bisondynlib_reset(void)
+{
     if (reset_flex_buffer) {
+fprintf(stderr, "Resetting flex...\n");
         reset_flex_buffer();
     }
 }
 
-char *bisondynlib_err() {
+char *bisondynlib_err()
+{
     return dlerror();
 }
 
-char *bisondynlib_lookup_hash(void *handle) {
+char *bisondynlib_lookup_hash(void *handle)
+{
     char **hash;
 
     hash = dlsym(handle, "rules_hash");
@@ -49,7 +54,8 @@ char *bisondynlib_lookup_hash(void *handle) {
     return hash ? *hash : NULL;
 }
 
-PyObject *bisondynlib_run(void *handle, PyObject *parser, void *cb, void *in, int debug) {
+PyObject *bisondynlib_run(void *handle, PyObject *parser, void *cb, void *in, int debug)
+{
     if(!handle)
         return NULL;
 
@@ -78,7 +84,8 @@ PyObject *bisondynlib_run(void *handle, PyObject *parser, void *cb, void *in, in
  * function(void *) returns a pointer to a function(PyObject *, char *)
  * returning PyObject*
  */
-PyObject *(*bisondynlib_lookup_parser(void *handle))(PyObject *, void *, void *, int) {
+PyObject *(*bisondynlib_lookup_parser(void *handle))(PyObject *, void *, void *, int)
+{
     PyObject *(*do_parse)(PyObject *, void *, void *, int) = dlsym(handle, "do_parse");
 
     dlerror();

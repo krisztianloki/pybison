@@ -139,6 +139,9 @@ class BisonParser(object):
     # The current line number
     lineno = 0
 
+    # The prefix for Flex and Bison. It will be changed to the name of the class. Change it to None if you want to yy/YY prefix
+    prefix = ""
+
     # Create a marker for input parsing.
     marker = 0
 
@@ -180,6 +183,9 @@ class BisonParser(object):
               is self.defaultNodeClass (in this base class, BisonNode)
         """
         self.debug = kw.get('debug', 0)
+
+        if self.prefix == "":
+            self.prefix = type(self).__name__
 
         if buildDirectory is not None:
             self.buildDirectory = buildDirectory + os.path.sep
@@ -242,6 +248,17 @@ class BisonParser(object):
         return self.last[idx]
 
 
+    def __del__(self):
+        print("""
+Deleting self.engine
+""")
+
+        if hasattr(self, "engine") and self.engine:
+            self.engine.__del__()
+            self.engine.closeLib()
+            del self.engine
+
+
     def _handle(self, targetname, option, names, values):
         """
         Callback which receives a target from parser, as a targetname
@@ -291,15 +308,15 @@ class BisonParser(object):
         self.engine.reset()
 
 
-    def parse_string(self, string):
+    def parse_string(self, string, **kw):
         """Supply file-like object containing the string."""
         file = IO(string.encode('utf-8'))
-        return self.run(file=file)
+        return self.run(file=file, **kw)
 
 
-    def parse_file(self, filename):
+    def parse_file(self, filename, **kw):
         """Better interface."""
-        return self.run(file=filename)
+        return self.run(file=filename, **kw)
 
 
     def run(self, **kw):
@@ -332,18 +349,19 @@ class BisonParser(object):
             filename = None
             fileobj = None
 
-        read = kw.get('read', self.read)
+        read = kw.get('read', None)
 
         debug = kw.get('debug', False)
 
         # back up existing attribs
         oldfile = self.file
-        oldread = self.read
+        oldread = None
 
         # plug in new ones, if given
         if fileobj:
             self.file = fileobj
         if read:
+            oldread   = self.read
             self.read = read
         self.lineno = 0
 
@@ -384,7 +402,8 @@ class BisonParser(object):
 
         # restore old values
         self.file = oldfile
-        self.read = oldread
+        if oldread:
+            self.read = oldread
         self.marker = 0
 
         if self.verbose:
