@@ -639,7 +639,7 @@ cdef class ParserEngine:
         proc = subprocess.Popen(' '.join(bisonCmd), stdout = subprocess.PIPE, stderr = subprocess.PIPE, shell = True, cwd = buildDirectory)
         (out, err) = proc.communicate()
         if proc.returncode:
-            raise Exception(err)
+            raise Exception(err.decode())
 
         if parser.verbose:
             print("CMD Output: {}".format(out))
@@ -674,7 +674,7 @@ cdef class ParserEngine:
         proc = subprocess.Popen(' '.join(flexCmd), stdout = subprocess.PIPE, stderr = subprocess.PIPE, shell = True, cwd = buildDirectory)
         (out, err) = proc.communicate()
         if proc.returncode:
-            raise Exception(err)
+            raise Exception(err.decode())
 
         if parser.verbose:
             print("CMD Output: {}".format(out))
@@ -854,9 +854,7 @@ def hashParserObject(parser):
 
     # add the tokens
     # workaround pyrex weirdness
-    # tokens = list(parser.tokens)
-    tokens = parser.tokens[0]
-    update(",".join(tokens))
+    update(",".join(list(parser.tokens)))
 
     # add the precedences
     for direction, tokens in parser.precedences:
